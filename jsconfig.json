@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {
+        "baseUrl": "../",
+        "allowSyntheticDefaultImports": true,
+        "alwaysStrict": true,
+        "checkJs": true,
+        "target": "esnext",
+        "paths": {
+            "/mjs/*": ["mjs/*"],
+            "/*": ["*"]
+        }
+    },
+    "include": ["**/*.js","../mjs/**.js"]
+}
