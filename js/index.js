@@ -1,236 +1,174 @@
-/*
+const INFO_TEXT = document.querySelector(".info").firstChild;
+const BEST_INFO_TEXT = document.querySelector(".best_info").firstChild;
+const FORMATTER = {
+    Decimal: new Intl.NumberFormat( "en", { style: "decimal", minimumFractionDigits: 0, maximumFractionDigits: 3 } ).format,
+}
 
-the big think list
+let url = new URL( window.location.href );
+let query = new URLSearchParams( url.search );
 
-towers
-    towers based on their size (tile size) will have a different amount of module slots
-    module slots 
-        can either be direct modifiers for the towers projectiles / attacks or passives
-    pilots
-        towers can have pilots to add stat bonuses or other passive effects
-    turret heads will be the determining factor in how many projectiles per shot (3 barrels = 3 projectiles)
+const QUERY_SOLVER_PATH = `./js/${query.get( "solver" )}.js` ?? "./js/solver.js";
+const QUERY_SOLVERS = Number( query.get( "solvers" ) ?? 1 );
+const QUERY_SOLVER_ITERATIONS = Number( query.get( "iterations" ) ?? 100 );
+const QUERY_PROJECTILE_LIMIT = Number( query.get( "projectile_limit" ) ?? 9999 );
+const QUERY_MANA_LIMIT = Number( query.get( "mana_limit" ) ?? 20000 );
+const QUERY_ACTION_LIMIT = Number( query.get( "action_limit" ) ?? 100000 );
+const QUERY_EXTRA_MODIFIERS = query.get( "extra_modifiers" )?.split(",") ?? [];
+const QUERY_FASTER_PROJECTILES = Number( query.get( "faster_projectiles" ) ?? 0 );
+const QUERY_IMPROVEMENT_THRESHOLD = Number( query.get( "improvement" ) ?? 500 );
+const QUERY_DECK_SIZE = Number( query.get( "deck_size" ) ?? 25 );
+const QUERY_DECKS_TO_TEST = Number( query.get( "decks_to_test" ) ?? -1 );
+const QUERY_SCORE_THESE = query.get( "score_these" )?.split(",") ?? [];
+const QUERY_FLAGS = query.get( "flags" )?.split(",") ?? [];
+for ( let i = 0; i < QUERY_FASTER_PROJECTILES; i++ ){ QUERY_EXTRA_MODIFIERS.push( "fast_projectiles" ); }
 
-theming
-    a competition to see if you can prevent the [enemy] from making their way to the [target]
-    collect points by protecting your [target] and destroying [enemy] to trade for upgrades, etc
+let best_deck_data = {};
+let best_deck_score = 0;
+let QUERY_ZETA_DECK = query.get( "zeta_deck" )?.split(",") ?? [];
+let QUERY_WAND_DECK = query.get( "deck" )?.split(",") ?? [];
+if ( QUERY_FLAGS.indexOf("info") === -1 )
+{
+    while ( QUERY_WAND_DECK.length < QUERY_DECK_SIZE ){
+        QUERY_WAND_DECK.push( "DAMAGE" );
+    }
+}
 
-hit areas
-    cones
-    circles
-    points
-    raycast
-    complex
-    area
-
-enemies
-    normal
-    herd / horde (many targets)
-    fast (prediction / slow shots)
-    shielded (regenerative shield, require quick/multi shots)
-    flying (separate pathing)
-
-maps
-    single route
-    multi route
-    ping pong
-
-
+/*[
+    "DIVIDE_10",
+    "DUPLICATE",
+    "DUPLICATE",
+    "DUPLICATE",
+    "DUPLICATE",
+    "HITFX_CRITICAL_WATER",
+    "HEAVY_SHOT",
+    "HITFX_CRITICAL_WATER",
+    "HITFX_CRITICAL_WATER",
+    "MU",
+    "MU",
+    "LIGHT_SHOT",
+    "CHAOTIC_ARC",
+    "PIERCING_SHOT",
+    "HEAVY_SHOT",
+    "MU",
+    "MU",
+    "RUBBER_BALL",
+    "ACCELERATING_SHOT",
+    "HOMING_ROTATE",
+    "LIGHT_SHOT",
+    "MU",
+    "MU",
+    "MU",
+    "HEAVY_SHOT",
+];
 */
-import { SLS } from "/mjs/sls.js";
-import { Boil } from "/mjs/boil.js";
-import { ImageFont } from "/mjs/ifl2.0.js";
-import { Triangle, TriangleMesh } from "/mjs/collision.js";
-import { Color } from "/mjs/color.js";
-import { Enemy, ProjectileSpawner, Projectile, TowerGame, ProjectilesDeck } from "./theming.js";
-import { DEGRAD, Angle } from "/mjs/qml.js";
-import { PROJECTILE_CARD } from "./content.js";
-import { GL, IMAGE_FONT, UIProjectilesCardLibrary, UIProjectilesDeck, CURSOR_DATA, UI_INPUT, GAME_INPUT } from "./constants.js";
 
-const GAME_SCALING = 2;
-let paused = false;
-const canvas = document.querySelector( "canvas" );
-const GAME = new TowerGame();
+/*[
+    "DIVIDE_10",
+    "DUPLICATE",
+    "DUPLICATE",
+    "DUPLICATE",
+    "DUPLICATE",
+    "HITFX_CRITICAL_WATER",
+    "HEAVY_SHOT",
+    "HITFX_CRITICAL_WATER",
+    "HITFX_CRITICAL_WATER",
+    "MU",
+    "MU",
+    "LIGHT_SHOT",
+    "CHAOTIC_ARC",
+    "PIERCING_SHOT",
+    "HEAVY_SHOT",
+    "MU",
+    "MU",
+    "RUBBER_BALL",
+    "ACCELERATING_SHOT",
+    "HOMING_ROTATE",
+    "LIGHT_SHOT",
+    "MU",
+    "MU",
+    "MU",
+    "HEAVY_SHOT",
+];*/
 
-/**
- * @param {Boil} boil
- */
-function Setup( boil )
-{
+const SOLVER_COUNT = QUERY_SOLVERS ?? 10;
+let solvers = [];
+let solvers_data = [];
 
-    GL.Setup( canvas, GAME_SCALING, {x:800, y:600} );
-    boil.sls.Promise( SLS.LoadImage( "./img/sprites.png" ).then( image =>
+for ( let i=0; i < SOLVER_COUNT; i++ ){
+    let new_solver = new Worker(QUERY_SOLVER_PATH);
+    new_solver.onmessage = function(e){
+        if ( e.data.type === "deck" ){
+            if ( QUERY_FLAGS.indexOf( "info" ) !== -1 || e.data.score > best_deck_score )
+            {
+                best_deck_score = e.data.score;
+                QUERY_WAND_DECK = e.data.deck;
+                best_deck_data = e.data.data;
+                for ( let solver of solvers ){
+                    solver.postMessage( { type:"deck", deck:QUERY_WAND_DECK } );
+                }
+                RefreshBestInfo();
+            }
+        }
+        if ( e.data.type === "heartbeat" ){
+            solvers_data[i] = e.data;
+            RefreshInfo();
+        }
+    }
+
+    let score_these = {};
+    for ( let trait of QUERY_SCORE_THESE ){ score_these[trait] = true; }
+    let flags = {};
+    for ( let trait of QUERY_FLAGS ){ flags[trait] = true; }
+    new_solver.postMessage( { type: "settings",
+        projectile_limit: QUERY_PROJECTILE_LIMIT,
+        extra_modifiers: QUERY_EXTRA_MODIFIERS,
+        iterations: QUERY_SOLVER_ITERATIONS,
+        mana_limit: QUERY_MANA_LIMIT,
+        action_limit: QUERY_ACTION_LIMIT,
+        improvement_threshold: QUERY_IMPROVEMENT_THRESHOLD,
+        decks_to_test: QUERY_DECKS_TO_TEST,
+        score_these: score_these,
+        flags: flags
+    } );
+    new_solver.postMessage( { type: "deck", deck: QUERY_WAND_DECK, zeta_deck: QUERY_ZETA_DECK } );
+    solvers.push( new_solver );
+}
+
+function RefreshInfo(){
+
+    let info_string = "";
+    let decks_counted = 0;
+    let solver_data_string = "";
+    for ( let [solver_index,solver_data] of solvers_data.entries() ){
+        if (solver_data != null ) {
+            decks_counted += solver_data?.decks_tested ?? 0;
+            solver_data_string += `Solver ${solver_index+1}: ${solver_data.shuffles} (${solver_data.shuffles_since_last_solve}) Shuffles - ${solver_data.same_deck_shuffles} Mutations - ${FORMATTER.Decimal(solver_data.best_deck_score)} Best Deck Score\n`;
+        }
+    }
+    info_string += `Decks Tested: ${FORMATTER.Decimal( decks_counted )}\n${solver_data_string}`;
+    INFO_TEXT.nodeValue = info_string;
+}
+
+function RefreshBestInfo(){
+    let info_string = "";
+
+    if ( best_deck_data ){
+        for ( let [k,v] of Object.entries( best_deck_data ) ){
+            info_string = info_string + `${k}\t${v.toString()}\n`;
+        }
+    }
+
+    let best_deck_string = "";
+    let compact_deck_string = "";
+    for ( let [k,v] of QUERY_WAND_DECK.entries() )
     {
-        GL.AttachTextureSource( image, "sprites" );
-        GL.DefineTexture( "sprites", "cursor", 1, 25, 15, 15, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "bullet_round", 1, 1, 11, 11, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "bullet_round_trigger", 31, 1, 11, 11, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "bullet_arrow", 13, 1, 17, 7, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "enemy", 0, 32, 32, 32, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_empty", 1, 138, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_backing", 17, 25, 21, 21, 0.5, 0.5 );
-        
-        GL.DefineTexture( "sprites", "card_draw2", 1, 84, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_draw3", 19, 84, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_draw4", 37, 84, 17, 17, 0.5, 0.5 );
-        //GL.DefineTexture( "sprites", "card_draw2", 57, 84, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_bullet_simple", 1, 102, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_bullet_syringe", 19, 102, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_bullet_trigger", 37, 102, 17, 17, 0.5, 0.5 );
-
-        GL.DefineTexture( "sprites", "card_formation_y", 1, 120, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_formation_w", 19, 120, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_formation_i", 37, 120, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_formation_t", 55, 120, 17, 17, 0.5, 0.5 );
-
-        GL.DefineTexture( "sprites", "card_stack2", 1, 156, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_stack3", 19, 156, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_stack4", 37, 156, 17, 17, 0.5, 0.5 );
-
-        GL.DefineTexture( "sprites", "card_arc5", 1, 174, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_arc15", 19, 174, 17, 17, 0.5, 0.5 );
-        GL.DefineTexture( "sprites", "card_arc45", 37, 174, 17, 17, 0.5, 0.5 );
-
-        /*
-        GL.AttachTextureSource( image, "sprites" );
-        GL.DefineTexture( "sprites", "flashlight", 177, 177, 78, 78, 0.5, 0.5 );
-        GL.DefineTextures( "sprites", [
-            "tile0", "tile1", "tile2", "tile3",
-            "tile4", "tile5", "tile6", "tile7",
-            "tile8", null, null, null,
-            "tile9", "tile10", "tile11", "tile12"
-        ], 1, 1, 16, 16, 4, 4, 1, 0.5, 0.5 );
-        */
-    } ) );
-    boil.sls.Promise( SLS.LoadImage( "./img/atex.png" ).then( image =>
-    {
-        GL.SetAlphaTexture( image );
-    } ) );
-    boil.sls.Promise( SLS.LoadXHTTP( "/fonts/tinyFont.ifl" ).then( data =>
-    {
-        //imageFont = ImageFont.FromImage( image, characterStringTextrea.value, -1, undefined, undefined, undefined, 0xFF00FF );
-        IMAGE_FONT.Default = ImageFont.Import( data );
-        boil.sls.Promise( SLS.LoadImage( IMAGE_FONT.Default.src ).then( image => 
-        {
-            GL.AttachTextureSource( image, "tinyFont" );
-        } ) );
-    } ) );
-
-    UI_INPUT.Setup( window, GL.canvas );
-    UI_INPUT.SetMouseScaling( 1 / GAME_SCALING, 1 / GAME_SCALING );
-    GAME_INPUT.Setup( window, GL.canvas );
-    GAME_INPUT.SetMouseScaling( 1 / GAME_SCALING, 1 / GAME_SCALING );
-}
-
-let enemy = new Enemy();
-/** @type {ProjectilesDeck} */
-let testDeck;
-let t = 0;
-let s = 0;
-
-function Initialize()
-{
-    testDeck = new ProjectilesDeck();
-    testDeck.order = [
-        PROJECTILE_CARD.TriggerBullet,
-    ];
-}
-
-function Update( dt )
-{
-    if ( paused === false ) {
-        const dtt = dt / 1000;
-    }
-    enemy.position.x = Math.cos( Date.now() / 1000 ) * 100 + 100;
-    enemy.position.y = 100;
-    enemy.dirtyMatrix = true;
-
-    /*
-    let now = Date.now();
-    if ( now - t >= 100 ) {
-        t = now;
-        let spawner = new ProjectileSpawner();
-        //spawner.spread = Math.sin( now / 6000 ) * 10 * DEGRAD;
-        spawner.stackAmount = Math.floor(s / 10) % 3 + 1;
-        //spawner.spread = 2 * DEGRAD;
-        spawner.arc = (36 * s % 360) * DEGRAD;
-        spawner.amount = s % 10 + 1;
-        spawner.Spawn( GL.targetSize.x / 2 / GL.scale, GL.targetSize.y / 2 / GL.scale, 0, ( projectile ) =>
-        {
-            projectile.lifetime = 1000;
-            GAME.EntityAdd( projectile )
-        } );
-        s += 1;
-    }
-    */
-    
-    let mouseX = GAME_INPUT.MouseX( GL.canvas );
-    let mouseY = GAME_INPUT.MouseY( GL.canvas );
-
-    if ( GAME_INPUT.IsMousePressed( 0 ) === true ) {
-        let px = GL.targetSize.x / 2 / GL.scale;
-        let py = GL.targetSize.y / 2 / GL.scale;
-        let angle = Angle( px, py, mouseX, mouseY );
-        testDeck.Draw( 1 );
-        testDeck.SpawnQueued( px, py, angle, projectile => GAME.EntityAdd( projectile ) );
+        best_deck_string = `${best_deck_string}[${k}]={action_id="${v}"},\n`;
+        compact_deck_string = compact_deck_string + v +",";
     }
 
-    GAME.Update( dt );
+    info_string += `\n${best_deck_string}\n\n${compact_deck_string.substr(0,compact_deck_string.length-1)}`;
 
-    //GL.Maintain();
-    //GL.Flush();
-    
-    GAME_INPUT.Update( dt );
-}
+    document.title = "best: "+best_deck_data["Deck Score"];
 
-function Render( dt )
-{
-    if ( paused === false ) {
-        let now = performance.now();
-        GL.Maintain();
-        GL.Clear( 0, 0, 0, 1 );
-        let mouseX = UI_INPUT.MouseX();
-        let mouseY = UI_INPUT.MouseY();
-        //GL.Render( "bullet_arrow", mouseX, mouseY );
-        GL.Save();
-        for ( let mesh of enemy.meshes ) {
-            //mesh = mesh.Transformed( enemy.mat4 );
-            //let collision = TriangleMesh.PointIntersect( mouseX, mouseY, mesh );
-            //if ( collision === true ) {
-            //    GL.RenderTriangles( mesh.triangles, Color.FromRGB( 255, 0, 0 ) );
-            //}
-            //else {
-            //    GL.RenderTriangles( mesh.triangles );
-            //}
-        }
-        for ( let entity of GAME.map.entities ) {
-            entity.Render( GL );
-        }
-        GL.Restore();
-
-        UIProjectilesDeck( GL, testDeck, 13, 13 );
-        UIProjectilesCardLibrary( GL, 13, 33 );
-        if ( CURSOR_DATA != null && CURSOR_DATA.sprite != null ) {
-            GL.Render( CURSOR_DATA.sprite, mouseX, mouseY );
-        }
-        else
-        {
-            GL.Render( "cursor", mouseX, mouseY );
-        }
-
-        GL.Flush();
-        //GL.Maintain();
-        //imageFont.Print( WGLDDPrint, `DEBUG MESSAGE` );
-        //GL.Flush();
-        UI_INPUT.Update( dt );
-    }
-}
-
-function Refresh() { }
-
-//window.onblur = () => paused = true;
-//window.onfocus = () => paused = false;
-
-window.onload = () =>
-{
-    new Boil( Setup, Initialize, Update, Render, Refresh, 16, 4, 0, 1 ).Run();
+    BEST_INFO_TEXT.nodeValue = info_string;
 }
